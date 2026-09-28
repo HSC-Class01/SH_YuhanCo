@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="260" height="44" viewBox="0 0 260 44" role="img" aria-label="대시보드 바로가기">
-<rect width="260" height="44" rx="10" fill="#6d4aff"/>
-<circle cx="25" cy="22" r="12" fill="#fff" opacity=".96"/>
-<path d="M20 22h10M25 17v10" stroke="#6d4aff" stroke-width="2.2" stroke-linecap="round"/>
-<text x="48" y="27" fill="#fff" font-family="Arial,sans-serif" font-size="15" font-weight="700">🔗 대시보드 바로가기</text>
-</svg>

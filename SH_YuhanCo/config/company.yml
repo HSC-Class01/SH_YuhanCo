@@ -1,0 +1,31 @@
+company:
+  name: 유한양행
+  stock_code: '000100'
+  start_year: 2010
+  report_types:
+    - annual
+    - half_year
+    - quarterly
+  fs_div: CFS
+  currency: KRW
+  unit: million_krw
+
+report_codes:
+  annual: '11011'
+  half_year: '11012'
+  q1: '11013'
+  q3: '11014'
+
+peer_firms:
+  - name: 한미약품
+    stock_code: '128940'
+  - name: GC녹십자
+    stock_code: '006280'
+  - name: 대웅제약
+    stock_code: '069620'
+  - name: 종근당
+    stock_code: '185750'
+  - name: HK이노엔
+    stock_code: '195940'
+  - name: 동아에스티
+    stock_code: '170900'

@@ -4,7 +4,7 @@ import re
 from collections import defaultdict
 from typing import Any
 
-ACCOUNT_ALIASES = {
+ACCOUNT_IDS = {\n    "revenue": {"ifrs-full_Revenue"},\n    "gross_profit": {"ifrs-full_GrossProfit"},\n    "operating_income": {"dart_OperatingIncomeLoss", "ifrs-full_OperatingIncomeLoss"},\n    "pretax_income": {"ifrs-full_ProfitLossBeforeTax"},\n    "net_income": {"ifrs-full_ProfitLoss"},\n}\n\nACCOUNT_ALIASES = {
     "revenue": ["매출액", "수익(매출액)", "수익(매출)", "매출"],
     "gross_profit": ["매출총이익", "매출총손익"],
     "sga": ["판매비와관리비", "판매비및관리비", "판매비와 일반관리비"],
@@ -23,7 +23,7 @@ ACCOUNT_ALIASES = {
     "current_liabilities": ["유동부채"],
     "short_borrowings": ["단기차입금", "단기차입부채"],
     "long_borrowings": ["장기차입금", "장기차입부채", "장기차입금(비유동)"],
-    "interest_expense": ["이자비용", "금융원가", "이자비용(금융원가)"],
+    "interest_expense": ["이자비용", "금융원가", "이자비용(금융원가)", "금융비용"],
     "cfo": ["영업활동으로 인한 현금흐름", "영업활동현금흐름", "영업활동 현금흐름"],
     "cfi": ["투자활동으로 인한 현금흐름", "투자활동현금흐름", "투자활동 현금흐름"],
     "cff": ["재무활동으로 인한 현금흐름", "재무활동현금흐름", "재무활동 현금흐름"],
@@ -76,7 +76,7 @@ def extract_metrics(api_data: dict[str, Any]) -> dict[str, float | None]:
     rows = api_data.get("list", [])
     metrics: dict[str, float | None] = {}
     for key, aliases in ACCOUNT_ALIASES.items():
-        row = choose_account(rows, aliases)
+        row = choose_account(rows, aliases, ACCOUNT_IDS.get(key))
         metrics[key] = parse_amount(row.get("thstrm_amount")) if row else None
     return metrics
 

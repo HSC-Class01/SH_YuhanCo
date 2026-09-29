@@ -68,7 +68,7 @@ def structured_rows(client: DartClient, corp_code: str, year: int, fs_div: str) 
         except DartAPIError:
             continue
         if data.get("list"):
-            metrics = extract_metrics(data)
+            metrics = extract_metrics(data, cumulative=(kind in {"half_year", "q3"}))
             output.append({"year": year, "kind": kind, "report_code": code, "source_method": "OpenDART XBRL API", **metrics})
     return output
 

@@ -1,6 +1,12 @@
 name: Update DART financials and deploy dashboard
 
 on:
+  push:
+    branches: ['main']
+    paths:
+      - 'src/**'
+      - 'scripts/**'
+      - 'config/**'
   workflow_dispatch:
   schedule:
     - cron: '17 0 1 * *'

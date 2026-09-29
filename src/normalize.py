@@ -90,12 +90,33 @@ def choose_account(
     return None
 
 
-def extract_metrics(api_data: dict[str, Any]) -> dict[str, float | None]:
+FLOW_METRICS = {
+    "revenue", "gross_profit", "sga", "operating_income", "pretax_income",
+    "net_income", "controlling_net_income", "interest_expense",
+    "cfo", "cfi", "cff", "capex_ppe", "capex_intangible",
+}
+
+
+def extract_metrics(
+    api_data: dict[str, Any],
+    cumulative: bool = False,
+) -> dict[str, float | None]:
     rows = api_data.get("list", [])
     metrics: dict[str, float | None] = {}
     for key, aliases in ACCOUNT_ALIASES.items():
         row = choose_account(rows, aliases, ACCOUNT_IDS.get(key))
-        metrics[key] = parse_amount(row.get("thstrm_amount")) if row else None
+        if not row:
+            metrics[key] = None
+            continue
+
+        # OpenDART reports 3-month amounts in thstrm_amount for
+        # quarterly/semi-annual comprehensive income statements.
+        # Use thstrm_add_amount for H1/Q3 cumulative flow measures.
+        field = "thstrm_add_amount" if cumulative and key in FLOW_METRICS else "thstrm_amount"
+        value = row.get(field)
+        if value in (None, "", "-") and field != "thstrm_amount":
+            value = row.get("thstrm_amount")
+        metrics[key] = parse_amount(value)
     return metrics
 
 

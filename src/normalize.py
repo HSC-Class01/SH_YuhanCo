@@ -90,7 +90,7 @@ def choose_account(
     return None
 
 
-FLOW_METRICS = {
+FLOW_METRICS = {  # financial flow fields; interim cumulative handling is enabled below
     "revenue", "gross_profit", "sga", "operating_income", "pretax_income",
     "net_income", "controlling_net_income", "interest_expense",
     "cfo", "cfi", "cff", "capex_ppe", "capex_intangible",

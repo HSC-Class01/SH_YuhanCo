@@ -4,7 +4,15 @@ import re
 from collections import defaultdict
 from typing import Any
 
-ACCOUNT_IDS = {\n    "revenue": {"ifrs-full_Revenue"},\n    "gross_profit": {"ifrs-full_GrossProfit"},\n    "operating_income": {"dart_OperatingIncomeLoss", "ifrs-full_OperatingIncomeLoss"},\n    "pretax_income": {"ifrs-full_ProfitLossBeforeTax"},\n    "net_income": {"ifrs-full_ProfitLoss"},\n}\n\nACCOUNT_ALIASES = {
+ACCOUNT_IDS = {
+    "revenue": {"ifrs-full_Revenue"},
+    "gross_profit": {"ifrs-full_GrossProfit"},
+    "operating_income": {"dart_OperatingIncomeLoss", "ifrs-full_OperatingIncomeLoss"},
+    "pretax_income": {"ifrs-full_ProfitLossBeforeTax"},
+    "net_income": {"ifrs-full_ProfitLoss"},
+}
+
+ACCOUNT_ALIASES = {
     "revenue": ["매출액", "수익(매출액)", "수익(매출)", "매출"],
     "gross_profit": ["매출총이익", "매출총손익"],
     "sga": ["판매비와관리비", "판매비및관리비", "판매비와 일반관리비"],
@@ -54,7 +62,17 @@ def parse_amount(value: Any) -> float | None:
         return None
 
 
-def choose_account(accounts: list[dict[str, Any]], aliases: list[str]) -> dict[str, Any] | None:
+def choose_account(
+    accounts: list[dict[str, Any]],
+    aliases: list[str],
+    account_ids: set[str] | None = None,
+) -> dict[str, Any] | None:
+    # XBRL account_id is more stable than Korean account names, so use it first.
+    if account_ids:
+        for row in accounts:
+            if str(row.get("account_id") or "").strip() in account_ids:
+                return row
+
     norm_aliases = [clean_label(a) for a in aliases]
     exact = []
     for row in accounts:
@@ -62,8 +80,8 @@ def choose_account(accounts: list[dict[str, Any]], aliases: list[str]) -> dict[s
         if label in norm_aliases:
             exact.append(row)
     if exact:
-        # Prefer consolidated statement rows and common account classifications.
         return exact[0]
+
     for alias in norm_aliases:
         for row in accounts:
             label = clean_label(row.get("account_nm"))

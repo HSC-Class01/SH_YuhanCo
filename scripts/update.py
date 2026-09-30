@@ -4,6 +4,7 @@ import json
 import os
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -107,7 +108,17 @@ def structured_rows(client: DartClient, corp_code: str, year: int, fs_div: str) 
 
 
 def legacy_rows(client: DartClient, corp_code: str, year: int) -> list[dict]:
-    return [row for kind in ["annual", "half_year", "q1", "q3"] if (row := legacy_row(client, corp_code, year, kind))]
+    kinds = ["annual", "half_year", "q1", "q3"]
+    # Original-report downloads are independent and can be fetched concurrently.
+    # Keep the pool small to avoid stressing the DART API.
+    rows: list[dict] = []
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = {pool.submit(legacy_row, client, corp_code, year, kind): kind for kind in kinds}
+        for future in as_completed(futures):
+            row = future.result()
+            if row:
+                rows.append(row)
+    return rows
 
 
 def standalone_quarters(rows: list[dict]) -> list[dict]:

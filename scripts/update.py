@@ -52,9 +52,9 @@ def find_regular_filing(client: DartClient, corp_code: str, year: int, kind: str
     }
     matched = [r for r in data.get("list", []) if targets[kind] in str(r.get("report_nm", ""))]
     if kind == "q1":
-        matched = [r for r in matched if "1분기" in str(r.get("report_nm", ""))]
+        matched = [r for r in matched if "1분기" in str(r.get("report_nm", "")) or "분기보고서" in str(r.get("report_nm", ""))]
     elif kind == "q3":
-        matched = [r for r in matched if "3분기" in str(r.get("report_nm", ""))]
+        matched = [r for r in matched if "3분기" in str(r.get("report_nm", "")) or "분기보고서" in str(r.get("report_nm", ""))]
     if not matched:
         return None
     matched.sort(key=lambda r: (str(r.get("rcept_dt", "")), str(r.get("rcept_no", ""))), reverse=True)

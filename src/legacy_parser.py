@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import re
 import zipfile
-from typing import Iterable
+from typing import Any
 
 from bs4 import BeautifulSoup
 
@@ -19,14 +19,34 @@ def _numbers(text: str) -> list[float]:
     return vals
 
 
-def parse_original_report(zip_bytes: bytes, metric_aliases: dict[str, list[str]] = ACCOUNT_ALIASES) -> dict[str, float | None]:
-    """Heuristic parser for pre-XBRL DART report archives.
+def _pick_value(values: list[float], period_kind: str, flow: bool) -> float | None:
+    if not values:
+        return None
+    # Legacy DART income/cash-flow tables commonly show:
+    # current 3-month, current cumulative, prior 3-month, prior cumulative.
+    # For H1/Q3, the second current value is therefore preferred for flow items.
+    if flow and period_kind in {"half_year", "q3"} and len(values) >= 2:
+        return values[1]
+    return values[0]
 
-    It intentionally returns only values that can be matched to a metric label and
-    a numeric cell in the same table row. Unmatched values remain null rather than
-    being guessed.
+
+def parse_original_report(
+    zip_bytes: bytes,
+    period_kind: str = "annual",
+    metric_aliases: dict[str, list[str]] = ACCOUNT_ALIASES,
+) -> dict[str, float | None]:
+    """Extract legacy DART values from pre-XBRL/original report tables.
+
+    The old reports have inconsistent table layouts. We match the metric label
+    anywhere in the row, then choose the current-period numeric cell rather than
+    assuming the label is always the first table cell.
     """
     candidates: dict[str, list[float]] = {k: [] for k in metric_aliases}
+    flow_keys = {
+        "revenue", "gross_profit", "sga", "operating_income", "pretax_income",
+        "net_income", "controlling_net_income", "interest_expense",
+        "cfo", "cfi", "cff", "capex_ppe", "capex_intangible",
+    }
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
         for name in zf.namelist():
             if not name.lower().endswith((".xml", ".htm", ".html")):
@@ -37,16 +57,17 @@ def parse_original_report(zip_bytes: bytes, metric_aliases: dict[str, list[str]]
                 cells = [c.get_text(" ", strip=True) for c in tr.find_all(["td", "th"])]
                 if len(cells) < 2:
                     continue
-                label = clean_label(cells[0])
-                nums = []
-                for cell in cells[1:]:
+                row_text = clean_label(" ".join(cells))
+                nums: list[float] = []
+                for cell in cells:
                     nums.extend(_numbers(cell))
                 if not nums:
                     continue
                 for key, aliases in metric_aliases.items():
-                    if any(clean_label(a) == label or clean_label(a) in label for a in aliases):
-                        candidates[key].extend(nums[:2])
+                    normalized_aliases = [clean_label(a) for a in aliases]
+                    if any(alias and alias in row_text for alias in normalized_aliases):
+                        value = _pick_value(nums, period_kind, key in flow_keys)
+                        if value is not None:
+                            candidates[key].append(value)
 
-    # Prefer the first value in the first strong match. Legacy tables often place
-    # current period first; exact account labels are filtered before fuzzy matches.
     return {k: (v[0] if v else None) for k, v in candidates.items()}

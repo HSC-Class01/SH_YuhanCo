@@ -52,7 +52,7 @@ def parse_original_report(
             if not name.lower().endswith((".xml", ".htm", ".html")):
                 continue
             raw = zf.read(name)
-            soup = BeautifulSoup(raw, "lxml")
+            soup = BeautifulSoup(raw, "lxml-xml" if name.lower().endswith(".xml") else "lxml")
             for tr in soup.find_all("tr"):
                 cells = [c.get_text(" ", strip=True) for c in tr.find_all(["td", "th"])]
                 if len(cells) < 2:
@@ -69,5 +69,27 @@ def parse_original_report(
                         value = _pick_value(nums, period_kind, key in flow_keys)
                         if value is not None:
                             candidates[key].append(value)
+
+    # Some historical DART files are not table-structured after XML parsing.
+    # As a fallback, search the flattened document around each account label.
+    for name in zf.namelist():
+        if not name.lower().endswith((".xml", ".htm", ".html")):
+            continue
+        raw = zf.read(name)
+        soup = BeautifulSoup(raw, "lxml-xml" if name.lower().endswith(".xml") else "lxml")
+        flat = clean_label(soup.get_text(" ", strip=True))
+        for key, aliases in metric_aliases.items():
+            if candidates[key]:
+                continue
+            for alias in [clean_label(a) for a in aliases]:
+                pos = flat.find(alias)
+                if pos < 0:
+                    continue
+                window = flat[pos + len(alias):pos + len(alias) + 800]
+                nums = _numbers(window)
+                value = _pick_value(nums, period_kind, key in flow_keys)
+                if value is not None:
+                    candidates[key].append(value)
+                    break
 
     return {k: (v[0] if v else None) for k, v in candidates.items()}

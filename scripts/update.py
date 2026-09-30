@@ -6,6 +6,7 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import yaml
@@ -39,25 +40,49 @@ def find_regular_filing(client: DartClient, corp_code: str, year: int, kind: str
     bgn, end = year_windows(year, kind)
     try:
         data = client.report_list(corp_code, bgn, end, page_no=1, page_count=100)
-    except DartAPIError:
+    except DartAPIError as exc:
+        print(f"filing search warning: {year} {kind}: {exc}")
         return None
-    rows = data.get("list", [])
     targets = {
-        "annual": ["사업보고서"],
-        "half_year": ["반기보고서"],
-        "q1": ["분기보고서"],
-        "q3": ["분기보고서"],
-    }[kind]
-    # Prefer the filing whose report title explicitly matches the period/year.
-    matched = [r for r in rows if any(t in str(r.get("report_nm", "")) for t in targets)]
+        "annual": "사업보고서",
+        "half_year": "반기보고서",
+        "q1": "분기보고서",
+        "q3": "분기보고서",
+    }
+    matched = [r for r in data.get("list", []) if targets[kind] in str(r.get("report_nm", ""))]
     if kind == "q1":
-        matched = [r for r in matched if "1분기" in str(r.get("report_nm", "")) or "분기보고서" in str(r.get("report_nm", ""))]
+        matched = [r for r in matched if "1분기" in str(r.get("report_nm", ""))]
     elif kind == "q3":
-        matched = [r for r in matched if "3분기" in str(r.get("report_nm", "")) or "분기보고서" in str(r.get("report_nm", ""))]
+        matched = [r for r in matched if "3분기" in str(r.get("report_nm", ""))]
     if not matched:
         return None
     matched.sort(key=lambda r: (str(r.get("rcept_dt", "")), str(r.get("rcept_no", ""))), reverse=True)
     return matched[0]
+
+
+def legacy_row(client: DartClient, corp_code: str, year: int, kind: str, filing: dict | None = None) -> dict | None:
+    filing = filing or find_regular_filing(client, corp_code, year, kind)
+    if not filing:
+        return None
+    try:
+        raw = client.original_document(filing["rcept_no"])
+        metrics = parse_original_report(raw, period_kind=kind)
+    except Exception as exc:
+        print(f"legacy parse warning: {year} {kind}: {exc}")
+        return None
+    core = [metrics.get(k) for k in ("revenue", "operating_income", "net_income")]
+    if all(v is None for v in core):
+        print(f"legacy parse produced no core values: {year} {kind}")
+    return {
+        "year": year,
+        "kind": kind,
+        "report_code": {"annual":"11011","half_year":"11012","q1":"11013","q3":"11014"}[kind],
+        "rcept_no": filing.get("rcept_no"),
+        "report_name": filing.get("report_nm"),
+        "report_url": report_url(filing.get("rcept_no", "")),
+        "source_method": "DART original report heuristic",
+        **metrics,
+    }
 
 
 def structured_rows(client: DartClient, corp_code: str, year: int, fs_div: str) -> list[dict]:
@@ -65,45 +90,27 @@ def structured_rows(client: DartClient, corp_code: str, year: int, fs_div: str) 
     for kind, code in [("annual", "11011"), ("half_year", "11012"), ("q1", "11013"), ("q3", "11014")]:
         try:
             data = client.full_financials(corp_code, year, code, fs_div)
-        except DartAPIError:
+        except DartAPIError as exc:
+            print(f"XBRL unavailable; falling back to original report: {year} {kind}: {exc}")
+            row = legacy_row(client, corp_code, year, kind)
+            if row:
+                output.append(row)
             continue
         if data.get("list"):
             metrics = extract_metrics(data, cumulative=(kind in {"half_year", "q3"}))
             output.append({"year": year, "kind": kind, "report_code": code, "source_method": "OpenDART XBRL API", **metrics})
+        else:
+            row = legacy_row(client, corp_code, year, kind)
+            if row:
+                output.append(row)
     return output
 
 
 def legacy_rows(client: DartClient, corp_code: str, year: int) -> list[dict]:
-    output = []
-    for kind in ["annual", "half_year", "q1", "q3"]:
-        filing = find_regular_filing(client, corp_code, year, kind)
-        if not filing:
-            continue
-        try:
-            raw = client.original_document(filing["rcept_no"])
-            metrics = parse_original_report(raw)
-        except Exception as exc:
-            print(f"legacy parse warning: {year} {kind}: {exc}")
-            continue
-        output.append({
-            "year": year,
-            "kind": kind,
-            "report_code": {"annual":"11011","half_year":"11012","q1":"11013","q3":"11014"}[kind],
-            "rcept_no": filing.get("rcept_no"),
-            "report_name": filing.get("report_nm"),
-            "report_url": report_url(filing.get("rcept_no", "")),
-            "source_method": "DART original report heuristic",
-            **metrics,
-        })
-    return output
+    return [row for kind in ["annual", "half_year", "q1", "q3"] if (row := legacy_row(client, corp_code, year, kind))]
 
 
 def standalone_quarters(rows: list[dict]) -> list[dict]:
-    """Derive Q3 standalone from 9M - H1 where cumulative P&L is supplied.
-
-    The dashboard keeps Q1 and Q3 as report periods; Q2 is intentionally not
-    fabricated because the requested source set does not include a separate Q2 filing.
-    """
     by_year = {}
     for r in rows:
         by_year.setdefault(r["year"], {})[r["kind"]] = r
@@ -113,11 +120,21 @@ def standalone_quarters(rows: list[dict]) -> list[dict]:
             continue
         for key in ["revenue", "gross_profit", "sga", "operating_income", "pretax_income", "net_income", "controlling_net_income", "cfo", "cfi", "cff", "fcf"]:
             if q3.get(key) is not None and h1.get(key) is not None:
-                # Only if both periods are cumulative flow values; this is true for
-                # the structured DART interim statements. Balance-sheet items are not subtracted.
                 q3[key] = q3[key] - h1[key]
         q3["period_label"] = "Q3 (standalone)"
     return rows
+
+
+def _json_safe(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, float) and pd.isna(value):
+        return None
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_json_safe(v) for v in value]
+    return value
 
 
 def main() -> None:
@@ -129,11 +146,12 @@ def main() -> None:
 
     client = DartClient(api_key, ROOT / "data/raw")
     corp_code = client.find_corp_code(company["stock_code"])
-    (ROOT / "data" / "corp_code.json").write_text(json.dumps({"stock_code": company["stock_code"], "corp_code": corp_code}, ensure_ascii=False, indent=2), encoding="utf-8")
+    (ROOT / "data" / "corp_code.json").write_text(
+        json.dumps({"stock_code": company["stock_code"], "corp_code": corp_code}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
 
     rows: list[dict] = []
-    # 2015+ use structured XBRL API. 2010-2014 use original-report fallback because
-    # OpenDART's full-financial-statement API documents availability from 2015 onward.
     for year in range(int(company["start_year"]), datetime.now().year + 1):
         if year <= 2014:
             rows.extend(legacy_rows(client, corp_code, year))
@@ -151,7 +169,6 @@ def main() -> None:
     df["period"] = df["kind"].map(labels)
     df["period_label"] = df["period"]
 
-    # De-duplicate by period, retaining the latest extracted record.
     df = df.sort_values(["year", "period_order", "source_method"]).drop_duplicates(["year", "kind"], keep="last")
     ratio_df = calculate_ratios(df)
 
@@ -166,9 +183,12 @@ def main() -> None:
     peers = pd.DataFrame(config["peer_firms"])
     peers.to_csv(data_dir / "peers.csv", index=False, encoding="utf-8-sig")
 
-    latest = ratio_df.sort_values(["year", "period_order"]).iloc[-1].to_dict()
+    latest = _json_safe(ratio_df.sort_values(["year", "period_order"]).iloc[-1].to_dict())
     payload = {"company": company["name"], "stock_code": company["stock_code"], "corp_code": corp_code, "updated_at": datetime.now(timezone.utc).isoformat(), "latest": latest}
-    (data_dir / "latest.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    (data_dir / "latest.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, allow_nan=False),
+        encoding="utf-8",
+    )
     print(f"Updated {len(df)} periods; corp_code={corp_code}")
 
 

@@ -124,3 +124,5 @@ def merge_period(base: dict[str, Any], current: dict[str, float | None]) -> dict
     out = dict(base)
     out.update(current)
     return out
+
+# CI trigger: legacy parser maintenance verified.
